@@ -34,16 +34,15 @@ export default class MyPlugin extends Plugin {
 			this.activateView();
 		});
 
+		// 起動時に、現在アクティブなリーフに対して処理を実行
+		this.app.workspace.onLayoutReady(() => {
+			this.processActiveLeaf(this.app.workspace.activeLeaf);
+		});
+		
+		// リーフが切り替わった時にも、同じ処理を実行
 		this.registerEvent(
-			this.app.workspace.on('active-leaf-change', async (leaf) => {
-				if (!leaf) return;
-				if (leaf.view.getViewType() === 'pdf') {
-					const file = (leaf.view as FileView).file;
-					if (file) {
-						this.currentPdfText = await this.parsePdf(await this.app.vault.readBinary(file));
-						console.log("PDFテキストを抽出しました。");
-					}
-				}
+			this.app.workspace.on('active-leaf-change', (leaf) => {
+				this.processActiveLeaf(leaf);
 			})
 		);
 
@@ -52,6 +51,20 @@ export default class MyPlugin extends Plugin {
 
 	onunload() {
 		this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
+	}
+	
+	async processActiveLeaf(leaf: WorkspaceLeaf | null) {
+		if (!leaf) return;
+
+		if (leaf.view.getViewType() === 'pdf') {
+			const file = (leaf.view as FileView).file;
+			if (file) {
+				console.log(`PDFを検知しました: ${file.path}`);
+				this.currentPdfText = await this.parsePdf(await this.app.vault.readBinary(file));
+				console.log("PDFテキストを抽出しました。");
+				new Notice(`${file.basename} の内容を読み込みました。`);
+			}
+		}
 	}
 
 	async fetchAvailableModels(key: string): Promise<string[]> {
@@ -66,7 +79,6 @@ export default class MyPlugin extends Plugin {
 					'x-goog-api-key': key
 				}
 			});
-
 			return response.json.models
 				.filter((model: any) => model.supportedGenerationMethods.includes("generateContent"))
 				.map((model: any) => model.name);
@@ -117,7 +129,6 @@ export default class MyPlugin extends Plugin {
 	}
 }
 
-// 設定タブのクラス
 class SampleSettingTab extends PluginSettingTab {
 	plugin: MyPlugin;
 	constructor(app: App, plugin: MyPlugin) {
@@ -146,13 +157,13 @@ class SampleSettingTab extends PluginSettingTab {
 			.setDesc("Click 'Refresh List' after entering your API key. Then choose a model.")
 			.addDropdown(dropdown => {
 				if (this.plugin.settings.selectedModel) {
-					dropdown.addOption(this.plugin.settings.selectedModel, this.plugin.settings.selectedModel);
+					dropdown.addOption(this.plugin.settings.selectedModel, this.plugin.settings.selectedModel.replace("models/", ""));
 				}
 				dropdown.setValue(this.plugin.settings.selectedModel)
 				.onChange(async (value) => {
 					this.plugin.settings.selectedModel = value;
 					await this.plugin.saveSettings();
-					new Notice(`Model set to: ${value}`);
+					new Notice(`Model set to: ${value.replace("models/", "")}`);
 				});
 			})
 			.addButton(button => button
@@ -175,8 +186,13 @@ class SampleSettingTab extends PluginSettingTab {
 							models.forEach(modelName => {
 								dropdownEl.add(new Option(modelName.replace("models/", ""), modelName));
 							});
-							this.plugin.settings.selectedModel = dropdownEl.value;
-							this.plugin.saveSettings();
+							if (models.includes(this.plugin.settings.selectedModel)) {
+								dropdownEl.value = this.plugin.settings.selectedModel;
+							} else if (models.length > 0) {
+								dropdownEl.value = models[0];
+								this.plugin.settings.selectedModel = models[0];
+								await this.plugin.saveSettings();
+							}
 						}
 					}
 				}));

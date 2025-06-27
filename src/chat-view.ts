@@ -26,7 +26,7 @@ export class ChatView extends ItemView {
 			const userInput = inputEl.value;
 			if (!userInput || !messagesEl.isConnected) return;
 
-			messagesEl.createEl("div", { text: `You: ${userInput}`, cls: "user-message" });
+			messagesEl.createEl("div", { text: `${userInput}`, cls: "user-message" });
 			inputEl.value = "";
 			const thinkingEl = messagesEl.createEl("div", { text: "AIが考え中...", cls: "ai-message" });
 			
@@ -44,7 +44,13 @@ export class ChatView extends ItemView {
 				const prompt = `以下のPDFの内容に基づいて、次の質問に簡潔に答えてください。\n---\nPDF内容:\n${pdfText.substring(0, 12000)}\n---\n質問: ${userInput}`;
 				
 				const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent`;
-				const requestBody = { contents: [{ parts: [{ text: prompt }] }] };
+				const requestBody = {
+					contents: [{
+						parts: [{
+							text: prompt
+						}]
+					}]
+				};
 
 				const response = await requestUrl({
 					url: url,
@@ -58,16 +64,17 @@ export class ChatView extends ItemView {
 				
 				if (thinkingEl.isConnected) {
 					if (response.json.candidates && response.json.candidates.length > 0) {
-						thinkingEl.setText(response.json.candidates[0].content.parts[0].text);
+						const answer = response.json.candidates[0].content.parts[0].text;
+						thinkingEl.setText(answer);
 					} else {
 						console.warn("Gemini Response Blocked or Empty:", response.json);
-						thinkingEl.setText("AIからの応答がありませんでした。");
+						thinkingEl.setText("AIからの応答がありませんでした。プロンプトが安全性フィルターによってブロックされた可能性があります。");
 					}
 				}
 			} catch (error) {
 				console.error("API Call failed:", error);
 				if (thinkingEl.isConnected) {
-					thinkingEl.setText("エラー: AIからの応答取得に失敗しました。");
+					thinkingEl.setText("エラー: AIからの応答取得に失敗しました。APIキーやインターネット接続、コンソールの詳細エラーを確認してください。");
 				}
 			}
 		});
