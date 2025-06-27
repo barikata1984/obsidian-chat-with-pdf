@@ -15,6 +15,10 @@
   word-wrap: break-word; /* 長い単語でも折り返す */
   line-height: 1.5; /* 行の高さを調整して読みやすくする */
   width: fit-content; /* 中身のコンテンツに幅を合わせる */
+  
+  /* テキスト選択を強制的に有効にするための指定 */
+  -webkit-user-select: text !important;
+  user-select: text !important;
 }
 
 /* AIのメッセージ（左側に配置） */
@@ -27,7 +31,19 @@
 /* ユーザーのメッセージ（右側に配置） */
 .user-message {
   align-self: flex-end; /* 右寄せにする */
-  background-color: var(--interactive-accent); /* アクセントカラー（テーマによって青や紫など）を背景色にする */
+  background-color: var(--interactive-accent); /* アクセントカラーを背景色にする */
   color: var(--text-on-accent); /* アクセントカラー上のテキスト色（通常は白）にする */
   border-bottom-right-radius: 4px; /* 右下の角を尖らせる */
+}
+
+/* チャット入力欄のコンテナ */
+.chat-input-container {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+/* チャット入力欄本体 */
+.chat-input-container input {
+    flex-grow: 1; /* 残りのスペースをすべて埋める */
 }
