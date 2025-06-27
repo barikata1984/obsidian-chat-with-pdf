@@ -1,3 +1,4 @@
+// ★ 'Notice'をimportリストから削除
 import { ItemView, WorkspaceLeaf, requestUrl } from "obsidian";
 import MyPlugin from "./main";
 
@@ -26,7 +27,7 @@ export class ChatView extends ItemView {
 			const userInput = inputEl.value;
 			if (!userInput || !messagesEl.isConnected) return;
 
-			messagesEl.createEl("div", { text: `${userInput}`, cls: "user-message" });
+			messagesEl.createEl("div", { text: userInput, cls: "user-message" });
 			inputEl.value = "";
 			const thinkingEl = messagesEl.createEl("div", { text: "AIが考え中...", cls: "ai-message" });
 			
@@ -41,16 +42,10 @@ export class ChatView extends ItemView {
 			}
 
 			try {
-				const prompt = `以下のPDFの内容に基づいて、次の質問に簡潔に答えてください。\n---\nPDF内容:\n${pdfText.substring(0, 12000)}\n---\n質問: ${userInput}`;
+				const prompt = `以下のPDFの全文内容に基づいて、次の質問に答えてください。\n\n--- PDF CONTENT ---\n${pdfText}\n--- END PDF CONTENT ---\n\n質問: ${userInput}`;
 				
 				const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent`;
-				const requestBody = {
-					contents: [{
-						parts: [{
-							text: prompt
-						}]
-					}]
-				};
+				const requestBody = { contents: [{ parts: [{ text: prompt }] }] };
 
 				const response = await requestUrl({
 					url: url,
@@ -68,13 +63,26 @@ export class ChatView extends ItemView {
 						thinkingEl.setText(answer);
 					} else {
 						console.warn("Gemini Response Blocked or Empty:", response.json);
-						thinkingEl.setText("AIからの応答がありませんでした。プロンプトが安全性フィルターによってブロックされた可能性があります。");
+						let errorMessage = "AIからの応答がありませんでした。";
+						if (response.json.promptFeedback?.blockReason) {
+							errorMessage += ` (理由: ${response.json.promptFeedback.blockReason})`;
+						}
+						thinkingEl.setText(errorMessage);
 					}
 				}
 			} catch (error) {
 				console.error("API Call failed:", error);
+				let detailedError = "API呼び出しに失敗しました。";
+				if (error.response) {
+					try {
+						const errorJson = JSON.parse(error.response);
+						if (errorJson.error?.message) {
+							detailedError = `エラー: ${errorJson.error.message}`;
+						}
+					} catch (e) { /* ignore parsing error */ }
+				}
 				if (thinkingEl.isConnected) {
-					thinkingEl.setText("エラー: AIからの応答取得に失敗しました。APIキーやインターネット接続、コンソールの詳細エラーを確認してください。");
+					thinkingEl.setText(detailedError + " 詳細はコンソールを確認してください。");
 				}
 			}
 		});

@@ -11,11 +11,10 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === 'production');
 
-const copyPdfWorkerPlugin = {
+const copyPlugin = {
 	name: 'copy-pdf-worker',
 	setup(build) {
 		build.onEnd(() => {
-			// ユーザーの環境に合わせて .mjs に修正
 			const sourcePath = 'node_modules/pdfjs-dist/build/pdf.worker.mjs';
 			const destPath = 'pdf.worker.mjs';
 			try {
@@ -30,23 +29,18 @@ const copyPdfWorkerPlugin = {
 	},
 };
 
-/**
- * @type {import('esbuild').BuildOptions}
- */
 const config = {
-	banner: {
-		js: banner,
-	},
+	banner: { js: banner },
 	entryPoints: ['src/main.ts'],
 	bundle: true,
 	external: ['obsidian'],
 	format: 'cjs',
-	target: 'es2018',
+	target: 'es2020',
 	logLevel: "info",
 	sourcemap: prod ? false : 'inline',
 	treeShaking: true,
 	outfile: 'main.js',
-	plugins: [copyPdfWorkerPlugin],
+	plugins: [copyPlugin],
 };
 
 if (prod) {
