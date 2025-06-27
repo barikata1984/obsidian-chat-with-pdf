@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import process from "process";
-import builtins from "builtin-modules";
+import fs from "fs";
 
 const banner =
 `/*
@@ -9,41 +9,51 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const prod = (process.argv[2] === "production");
+const prod = (process.argv[2] === 'production');
 
-const context = await esbuild.context({
+const copyPdfWorkerPlugin = {
+	name: 'copy-pdf-worker',
+	setup(build) {
+		build.onEnd(() => {
+			// ユーザーの環境に合わせて .mjs に修正
+			const sourcePath = 'node_modules/pdfjs-dist/build/pdf.worker.mjs';
+			const destPath = 'pdf.worker.mjs';
+			try {
+				if (fs.existsSync(sourcePath)) {
+					fs.copyFileSync(sourcePath, destPath);
+					console.log('Copied pdf.worker.mjs to plugin root.');
+				}
+			} catch (err) {
+				console.error('Failed to copy pdf.worker.mjs:', err);
+			}
+		});
+	},
+};
+
+/**
+ * @type {import('esbuild').BuildOptions}
+ */
+const config = {
 	banner: {
 		js: banner,
 	},
-	entryPoints: ["main.ts"],
+	entryPoints: ['src/main.ts'],
 	bundle: true,
-	external: [
-		"obsidian",
-		"electron",
-		"@codemirror/autocomplete",
-		"@codemirror/collab",
-		"@codemirror/commands",
-		"@codemirror/language",
-		"@codemirror/lint",
-		"@codemirror/search",
-		"@codemirror/state",
-		"@codemirror/view",
-		"@lezer/common",
-		"@lezer/highlight",
-		"@lezer/lr",
-		...builtins],
-	format: "cjs",
-	target: "es2018",
+	external: ['obsidian'],
+	format: 'cjs',
+	target: 'es2018',
 	logLevel: "info",
-	sourcemap: prod ? false : "inline",
+	sourcemap: prod ? false : 'inline',
 	treeShaking: true,
-	outfile: "main.js",
-	minify: prod,
-});
+	outfile: 'main.js',
+	plugins: [copyPdfWorkerPlugin],
+};
 
 if (prod) {
-	await context.rebuild();
-	process.exit(0);
+	esbuild.build(config).catch(() => process.exit(1));
 } else {
-	await context.watch();
+	esbuild.context(config).then(ctx => {
+		console.log("Watching for changes...");
+		ctx.watch();
+	}).catch(() => process.exit(1));
 }
