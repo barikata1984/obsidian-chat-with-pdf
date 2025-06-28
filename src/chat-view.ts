@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, requestUrl, Notice, MarkdownRenderer } from "obsidian";
-import { MyPlugin } from "./main";
+import MyPlugin from "./main";
 
 interface GeminiContent {
 	role: 'user' | 'model';
@@ -11,6 +11,9 @@ export const CHAT_VIEW_TYPE = "pdf-chat-view";
 export class ChatView extends ItemView {
 	private conversationHistory: GeminiContent[] = [];
 	private messagesEl: HTMLDivElement;
+    private inputEl: HTMLInputElement;
+    private sendButton: HTMLButtonElement;
+
 
 	constructor(leaf: WorkspaceLeaf, private plugin: MyPlugin) {
 		super(leaf);
@@ -29,24 +32,23 @@ export class ChatView extends ItemView {
 
 		this.registerDomEvent(clearButton, 'click', () => {
 			this.conversationHistory = [];
-			if (this.messagesEl) {
-				this.messagesEl.empty();
-			}
+			if (this.messagesEl) { this.messagesEl.empty(); }
 			new Notice("Chat history has been cleared.");
 		});
 
 		const chatContainer = container.createDiv({ cls: "chat-container" });
 		this.messagesEl = chatContainer.createDiv({ cls: "chat-messages" });
 		const inputContainer = container.createDiv({ cls: "chat-input-container" });
-		const inputEl = inputContainer.createEl("input", { type: "text", placeholder: "PDFについて質問..." });
-		const sendButton = inputContainer.createEl("button", { text: "送信" });
+		this.inputEl = inputContainer.createEl("input", { type: "text", placeholder: "..." });
+		this.sendButton = inputContainer.createEl("button", { text: "送信" });
 
-		this.registerDomEvent(sendButton, 'click', async () => {
-			const userInput = inputEl.value;
-			if (!userInput || !this.messagesEl.isConnected) return;
+		// ★ 送信ボタンの処理を完全に復元
+		this.registerDomEvent(this.sendButton, 'click', async () => {
+			const userInput = this.inputEl.value;
+			if (!userInput || !this.messagesEl.isConnected || this.inputEl.disabled) return;
 
 			this.messagesEl.createEl("div", { text: userInput, cls: "user-message" });
-			inputEl.value = "";
+			this.inputEl.value = "";
 			
 			this.conversationHistory.push({ role: 'user', parts: [{ text: userInput }] });
 			
@@ -85,10 +87,7 @@ export class ChatView extends ItemView {
 				const response = await requestUrl({
 					url: url,
 					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-goog-api-key': apiKey
-					},
+					headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
 					body: JSON.stringify(requestBody),
 				});
 				
@@ -96,7 +95,6 @@ export class ChatView extends ItemView {
 					if (response.json.candidates && response.json.candidates.length > 0) {
 						const answer = response.json.candidates[0].content.parts[0].text;
 						answerBubbleEl.empty();
-						// シンプルな引数2つのバージョンを使用
 						await MarkdownRenderer.render(this.app, answer, answerBubbleEl, this.plugin.app.vault.getRoot().path, this);
 						this.conversationHistory.push({ role: 'model', parts: [{ text: answer }] });
 					} else {
@@ -123,6 +121,41 @@ export class ChatView extends ItemView {
 				}
 			}
 		});
+
+        this.plugin.onEmbeddingStateChange = this.updateInputState;
+        this.updateInputState();
 	}
-	async onClose() {}
+
+    async onClose() {
+        if (this.plugin) {
+            this.plugin.onEmbeddingStateChange = null;
+        }
+        return super.onClose();
+    }
+
+    private updateInputState = () => {
+        if (!this.inputEl || !this.sendButton) return;
+
+        if (this.plugin.isEmbeddingInProgress) {
+            this.inputEl.disabled = true;
+            this.sendButton.disabled = true;
+            this.inputEl.classList.add('is-processing');
+
+            const progress = this.plugin.embeddingProgress;
+            if (progress === 0) {
+                this.inputEl.placeholder = "PDFの解析と準備をしています...";
+            } else {
+                this.inputEl.placeholder = `埋め込みベクトルを生成中... ${progress}%`;
+            }
+        } else {
+            this.inputEl.disabled = false;
+            this.sendButton.disabled = false;
+            this.inputEl.classList.remove('is-processing');
+            if (this.plugin.currentPdfText) {
+                this.inputEl.placeholder = "PDFについて質問...";
+            } else {
+                this.inputEl.placeholder = "解析対象のPDFを開いてください";
+            }
+        }
+    }
 }

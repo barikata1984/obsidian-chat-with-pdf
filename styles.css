@@ -47,3 +47,14 @@
   font-size: var(--font-ui-small);
   margin-left: 10px;
 }
+
+/* ★ 以下のスタイルを追加 */
+.chat-input-container input.is-processing {
+  font-style: italic;
+}
+
+.chat-input-container input.is-processing::placeholder {
+  color: var(--text-muted);
+  opacity: 1; /*
+ブラウザのデフォルトスタイルを上書き */
+}
