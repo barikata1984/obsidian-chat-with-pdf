@@ -1,49 +1,49 @@
-/* チャットメッセージ全体のコンテナ設定 */
 .chat-messages {
-  display: flex; /* フレックスボックスレイアウトを有効化 */
-  flex-direction: column; /* 要素を縦に積む */
-  gap: 12px; /* 各メッセージの間の余白 */
-  padding: 10px; /* 内側の余白 */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px;
 }
-
-/* メッセージの吹き出しの共通スタイル */
-.user-message,
-.ai-message {
-  padding: 10px 15px; /* 吹き出しの内側の余白 */
-  border-radius: 18px; /* 角を丸くする */
-  max-width: 80%; /* 吹き出しの最大幅。画面幅いっぱいにならないようにする */
-  word-wrap: break-word; /* 長い単語でも折り返す */
-  line-height: 1.5; /* 行の高さを調整して読みやすくする */
-  width: fit-content; /* 中身のコンテンツに幅を合わせる */
-  
-  /* テキスト選択を強制的に有効にするための指定 */
-  -webkit-user-select: text !important;
+.user-message, .ai-message {
+  padding: 10px 15px;
+  border-radius: 18px;
+  max-width: 80%;
+  word-wrap: break-word;
+  line-height: 1.5;
+  width: fit-content;
   user-select: text !important;
+  -webkit-user-select: text !important;
 }
-
-/* AIのメッセージ（左側に配置） */
 .ai-message {
-  align-self: flex-start; /* 左寄せにする */
-  background-color: var(--background-secondary); /* 背景色をObsidianのテーマに合わせる */
-  border-bottom-left-radius: 4px; /* 左下の角を少しだけ尖らせて吹き出しの「しっぽ」を表現 */
+  align-self: flex-start;
+  background-color: var(--background-secondary);
+  border-bottom-left-radius: 4px;
 }
-
-/* ユーザーのメッセージ（右側に配置） */
 .user-message {
-  align-self: flex-end; /* 右寄せにする */
-  background-color: var(--interactive-accent); /* アクセントカラーを背景色にする */
-  color: var(--text-on-accent); /* アクセントカラー上のテキスト色（通常は白）にする */
-  border-bottom-right-radius: 4px; /* 右下の角を尖らせる */
+  align-self: flex-end;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-bottom-right-radius: 4px;
 }
-
-/* チャット入力欄のコンテナ */
 .chat-input-container {
     display: flex;
     gap: 8px;
     margin-top: 10px;
 }
-
-/* チャット入力欄本体 */
 .chat-input-container input {
-    flex-grow: 1; /* 残りのスペースをすべて埋める */
+    flex-grow: 1;
+}
+.chat-header {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.chat-header h4 {
+  margin: 10px 0;
+  flex-grow: 1;
+}
+.clear-chat-button {
+  font-size: var(--font-ui-small);
+  margin-left: 10px;
 }
