@@ -31,13 +31,10 @@ export class ChatView extends ItemView {
 	async onOpen() {
 		const container = this.contentEl;
 		container.empty();
-		
 		this.viewContainer = container.createDiv({ cls: 'chat-view-container' });
-		
 		const headerEl = this.viewContainer.createDiv({ cls: 'chat-header' });
 		headerEl.createEl("h4", { text: "PDF Chat (Gemini)" });
 		const clearButton = headerEl.createEl('button', { text: 'Clear Chat', cls: 'clear-chat-button' });
-
 		this.registerDomEvent(clearButton, 'click', () => {
 			this.conversationHistory = [];
 			if (this.messagesEl) { this.messagesEl.empty(); }
@@ -46,7 +43,6 @@ export class ChatView extends ItemView {
 			this.updateProcessingState({ status: this.plugin.currentPdfText ? 'complete' : 'idle' });
 			new Notice("Chat history has been cleared.");
 		});
-		
 		this.messagesEl = this.viewContainer.createDiv({ cls: "chat-messages" });
 		const inputContainer = this.viewContainer.createDiv({ cls: "chat-input-container" });
 		this.inputEl = inputContainer.createEl("input", { type: "text", placeholder: "..." });
@@ -62,7 +58,6 @@ export class ChatView extends ItemView {
 			}
 			const userInput = this.inputEl.value;
 			if (!userInput || !this.messagesEl.isConnected || this.inputEl.disabled) return;
-			
 			this.messagesEl.createEl("div", { text: userInput, cls: "user-message" });
 			this.inputEl.value = "";
 			this.conversationHistory.push({ role: 'user', parts: [{ text: userInput }] });
@@ -91,6 +86,20 @@ export class ChatView extends ItemView {
 						answerBubbleEl.empty();
 						await MarkdownRenderer.render(this.app, answer, answerBubbleEl, this.plugin.app.vault.getRoot().path, this);
 						this.conversationHistory.push({ role: 'model', parts: [{ text: answer }] });
+
+						// ★★★ ここからが修正点：類似度を計算して表示 ★★★
+						const answerEmbedding = await this.plugin.getEmbedding(answer);
+						if (answerEmbedding) {
+							const maxSimilarity = this.plugin.findMaxSimilarity(answerEmbedding);
+							if (maxSimilarity > 0) {
+								answerBubbleEl.createDiv({
+									cls: 'similarity-score',
+									text: `(最大関連度: ${(maxSimilarity * 100).toFixed(1)}%)`
+								});
+							}
+						}
+						// ★★★ 修正点ここまで ★★★
+
 					} else {
 						this.conversationHistory.pop();
 						answerBubbleEl.setText(`AIからの応答がありませんでした。 (理由: ${response.json.promptFeedback?.blockReason || '不明'})`);
@@ -106,12 +115,8 @@ export class ChatView extends ItemView {
 		});
 
         this.plugin.onStateChange = this.updateProcessingState;
-        
-		this.resizeObserver = new ResizeObserver(() => {
-			this.checkLayout();
-		});
+		this.resizeObserver = new ResizeObserver(() => { this.checkLayout(); });
 		this.resizeObserver.observe(this.contentEl);
-
 		this.updateProcessingState({ status: this.plugin.currentPdfText ? 'complete' : 'idle' });
 	}
 
@@ -132,9 +137,7 @@ export class ChatView extends ItemView {
 	private checkLayout = () => {
 		requestAnimationFrame(() => {
 			if (!this.viewContainer || !this.contentEl) return;
-			if (this.viewContainer.classList.contains('is-sticky')) {
-				return;
-			}
+			if (this.viewContainer.classList.contains('is-sticky')) { return; }
 			const availableHeight = this.contentEl.clientHeight;
 			const contentHeight = this.viewContainer.scrollHeight;
 			if (contentHeight > availableHeight) {
@@ -145,7 +148,6 @@ export class ChatView extends ItemView {
 
     private updateProcessingState = (state: ProcessingState) => {
 		if (this.hasChatStarted) return;
-
 		const createOrGetStatusEl = () => {
 			if (!this.statusEl || !this.statusEl.isConnected) {
 				this.messagesEl.querySelector('.chat-status-message')?.remove();
@@ -153,7 +155,6 @@ export class ChatView extends ItemView {
 			}
 			return this.statusEl;
 		};
-		
 		const setInputState = (disabled: boolean, placeholder: string) => {
 			if(!this.inputEl) return;
 			this.inputEl.disabled = disabled;
@@ -161,26 +162,11 @@ export class ChatView extends ItemView {
 		};
 
 		switch (state.status) {
-			case 'searching_cache':
-				createOrGetStatusEl().setText('エンべディングキャッシュの検索中...');
-				setInputState(true, 'PDFの前処理中のためお待ちください。');
-				break;
-			case 'loading_cache':
-				createOrGetStatusEl().setText('キャッシュからエンベディングを読み込んでいます...');
-				setInputState(true, 'PDFの前処理中のためお待ちください。');
-				break;
-			case 'reading':
-				createOrGetStatusEl().setText('PDFを読み込んでいます...');
-				setInputState(true, 'PDFの前処理中のためお待ちください。');
-				break;
-			case 'chunking':
-				createOrGetStatusEl().setText('テキストをチャンク化しています...');
-				setInputState(true, 'PDFの前処理中のためお待ちください。');
-				break;
-			case 'embedding':
-				createOrGetStatusEl().setText(`チャンクのエンベディングを計算中 - ${state.progress} / ${state.total} 完了`);
-				setInputState(true, 'PDFの前処理中のためお待ちください。');
-				break;
+			case 'searching_cache': createOrGetStatusEl().setText('エンべディングキャッシュの検索中...'); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
+			case 'loading_cache': createOrGetStatusEl().setText('キャッシュからエンベディングを読み込んでいます...'); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
+			case 'reading': createOrGetStatusEl().setText('PDFを読み込んでいます...'); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
+			case 'chunking': createOrGetStatusEl().setText('テキストをチャンク化しています...'); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
+			case 'embedding': createOrGetStatusEl().setText(`チャンクのエンベディングを計算中 - ${state.progress} / ${state.total} 完了`); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
 			case 'complete':
 				if (this.plugin.currentPdfText) {
 					createOrGetStatusEl().setText('エンベディング取得完了');

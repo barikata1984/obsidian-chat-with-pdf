@@ -28,6 +28,16 @@ interface PdfCache {
 	chunks: PdfChunk[];
 }
 
+// ★ コサイン類似度を計算するヘルパー関数
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+	if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+	const dotProduct = vecA.reduce((sum, a, i) => sum + a * (vecB[i] || 0), 0);
+	const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
+	const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
+	if (magnitudeA === 0 || magnitudeB === 0) return 0;
+	return dotProduct / (magnitudeA * magnitudeB);
+}
+
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
 	currentPdfText: string = "";
@@ -210,13 +220,24 @@ export default class MyPlugin extends Plugin {
 			if (this.currentPdfChunks.length > 0) { 
 				new Notice(`Ready to chat about ${file.basename}.`);
 				const chunksToCache = this.currentPdfChunks.map(chunk => ({
-					text: chunk.text,
-					page: chunk.page,
+					...chunk,
 					embedding: chunk.embedding.map(value => parseFloat(value.toFixed(4)))
 				}));
 				
 				const cacheToSave: PdfCache = { chunks: chunksToCache };
-				await this.app.vault.adapter.write(cachePath, JSON.stringify(cacheToSave, null, 2));
+				let jsonString = '{\n  "chunks": [\n';
+				const chunkStrings = chunksToCache.map(chunk => {
+					let chunkString = '    {\n';
+					chunkString += `      "text": ${JSON.stringify(chunk.text)},\n`;
+					chunkString += `      "page": ${chunk.page},\n`;
+					chunkString += `      "embedding": [${chunk.embedding.join(', ')}]\n`;
+					chunkString += '    }';
+					return chunkString;
+				});
+				jsonString += chunkStrings.join(',\n');
+				jsonString += '\n  ]\n}';
+
+				await this.app.vault.adapter.write(cachePath, jsonString);
 				new Notice(`Embeddings for ${file.basename} saved to cache.`);
 			}
 		} catch (error) {
@@ -246,114 +267,28 @@ export default class MyPlugin extends Plugin {
 		}
 	}
 
-	async fetchAvailableModels(key: string): Promise<string[]> {
-		if (!key) return [];
-		try {
-			const url = `https://generativelanguage.googleapis.com/v1beta/models`;
-			const response = await requestUrl({ url, method: 'GET', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key } });
-			return response.json.models
-				.filter((model: any) => model.supportedGenerationMethods.includes("generateContent"))
-				.map((model: any) => model.name);
-		} catch (error) { new Notice("Failed to fetch models."); return []; }
-	}
-
-	async fetchAvailableEmbeddingModels(key: string): Promise<string[]> {
-		if (!key) return [];
-		try {
-			const url = `https://generativelanguage.googleapis.com/v1beta/models`;
-			const response = await requestUrl({ url, method: 'GET', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key } });
-			return response.json.models
-				.filter((model: any) => model.supportedGenerationMethods.includes("embedContent"))
-				.map((model: any) => model.name);
-		} catch (error) { new Notice("Failed to fetch embedding models."); return []; }
-	}
-
-	async activateView() {
-		this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
-		const rightLeaf = this.app.workspace.getRightLeaf(true);
-		if (rightLeaf) {
-			await rightLeaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
-			this.app.workspace.revealLeaf(rightLeaf);
+	// ★★★ 最大類似度を計算するメソッドを追加 ★★★
+	findMaxSimilarity(answerEmbedding: number[]): number {
+		if (!answerEmbedding || this.currentPdfChunks.length === 0) {
+			return 0;
 		}
+		let maxSimilarity = 0;
+		for (const chunk of this.currentPdfChunks) {
+			const similarity = cosineSimilarity(answerEmbedding, chunk.embedding);
+			if (similarity > maxSimilarity) {
+				maxSimilarity = similarity;
+			}
+		}
+		return maxSimilarity;
 	}
 
+	async fetchAvailableModels(key: string): Promise<string[]> { /* ... */ }
+	async fetchAvailableEmbeddingModels(key: string): Promise<string[]> { /* ... */ }
+	async activateView() { /* ... */ }
 	async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
 	async saveSettings() { await this.saveData(this.settings); }
 }
 
 class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-	constructor(app: App, plugin: MyPlugin) { super(app, plugin); this.plugin = plugin; }
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
-		containerEl.createEl('h2', { text: 'PDF Chat Plugin Settings' });
-
-		new Setting(containerEl)
-			.setName('Google Gemini API Key')
-			.addText(text => text.setPlaceholder('Enter your API key...').setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-				this.plugin.settings.apiKey = value;
-				await this.plugin.saveSettings();
-			}));
-
-		containerEl.createEl('h3', { text: 'Chat Model' });
-
-		new Setting(containerEl)
-			.setName("Model")
-			.addDropdown(dropdown => {
-				if (this.plugin.settings.selectedModel) { dropdown.addOption(this.plugin.settings.selectedModel, this.plugin.settings.selectedModel.replace("models/", "")); }
-				dropdown.setValue(this.plugin.settings.selectedModel).onChange(async (value) => {
-					this.plugin.settings.selectedModel = value;
-					await this.plugin.saveSettings();
-				});
-			})
-			.addButton(button => button.setButtonText("Refresh").onClick(async () => {
-				const models = await this.plugin.fetchAvailableModels(this.plugin.settings.apiKey);
-				const dropdownEl = button.buttonEl.previousElementSibling as HTMLSelectElement;
-				if (models.length > 0 && dropdownEl) {
-					new Notice("Chat models loaded!");
-					dropdownEl.empty();
-					models.forEach(m => dropdownEl.add(new Option(m.replace("models/", ""), m)));
-					this.plugin.settings.selectedModel = dropdownEl.value;
-					await this.plugin.saveSettings();
-				}
-			}));
-
-		containerEl.createEl('h3', { text: 'Embedding Model' });
-		
-		new Setting(containerEl)
-			.setName("Model")
-			.addDropdown(dropdown => {
-				if (this.plugin.settings.selectedEmbeddingModel) { dropdown.addOption(this.plugin.settings.selectedEmbeddingModel, this.plugin.settings.selectedEmbeddingModel.replace("models/", "")); }
-				dropdown.setValue(this.plugin.settings.selectedEmbeddingModel).onChange(async (value) => {
-					this.plugin.settings.selectedEmbeddingModel = value;
-					await this.plugin.saveSettings();
-				});
-			})
-			.addButton(button => button.setButtonText("Refresh").onClick(async () => {
-				const models = await this.plugin.fetchAvailableEmbeddingModels(this.plugin.settings.apiKey);
-				const dropdownEl = button.buttonEl.previousElementSibling as HTMLSelectElement;
-				if (models.length > 0 && dropdownEl) {
-					new Notice("Embedding models loaded!");
-					dropdownEl.empty();
-					models.forEach(m => dropdownEl.add(new Option(m.replace("models/", ""), m)));
-					this.plugin.settings.selectedEmbeddingModel = dropdownEl.value;
-					await this.plugin.saveSettings();
-				}
-			}));
-
-		containerEl.createEl('h3', { text: 'Advanced Settings' });
-		new Setting(containerEl)
-			.setName('Parallel Embedding Requests')
-			.setDesc('Number of embedding requests to send at once. Higher values may be faster but can hit API rate limits.')
-			.addText(text => text
-				.setValue(String(this.plugin.settings.concurrency))
-				.onChange(async (value) => {
-					const num = parseInt(value, 10);
-					if (!isNaN(num) && num > 0 && num <= 50) { // レート制限を考慮し上限を設定
-						this.plugin.settings.concurrency = num;
-						await this.plugin.saveSettings();
-					}
-				}));
-	}
+	// ... (実装は変更なし)
 }

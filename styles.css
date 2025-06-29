@@ -75,12 +75,22 @@
   opacity: 1;
 }
 
-/* ★★★ ステータスメッセージのスタイルを最終修正 ★★★ */
 .chat-status-message {
-  align-self: flex-start; /* 左寄せ */
-  padding: 10px 15px;     /* 上下の余白を少なく */
+  align-self: center;
+  padding: 10px 15px;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
   user-select: none;
-  /* 背景色は指定せず、text-alignもデフォルトの左揃えに任せる */
+  width: 100%;
+  text-align: center;
+}
+
+/* ★★★ 類似度スコアのスタイルを追加 ★★★ */
+.similarity-score {
+  text-align: right;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  opacity: 0.8;
+  margin-top: 10px;
+  padding-right: 5px;
 }
