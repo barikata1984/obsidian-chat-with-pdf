@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, FileView, requestUrl, Notice, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, requestUrl, Notice, TFile } from 'obsidian';
 import * as pdfjsLib from 'pdfjs-dist';
 import { ChatView, CHAT_VIEW_TYPE } from './chat-view';
 
@@ -11,12 +11,12 @@ interface MyPluginSettings {
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
 	apiKey: '',
-	selectedModel: 'models/gemini-1.5-flash-latest',
+	selectedModel: 'models/gemini-1.5-pro-latest',
 	selectedEmbeddingModel: 'models/text-embedding-004',
 	lastProcessedFile: null,
 }
 
-interface PdfChunk {
+export interface PdfChunk {
   text: string;
   page: number;
   embedding: number[];
@@ -28,34 +28,16 @@ export default class MyPlugin extends Plugin {
 	currentPdfChunks: PdfChunk[] = [];
     public isEmbeddingInProgress: boolean = false;
     public embeddingProgress: number = 0;
-	// ★ イベントの代わりにコールバック関数を保持するプロパティ
 	public onEmbeddingStateChange: (() => void) | null = null;
 
 	async onload() {
 		await this.loadSettings();
-
 		const workerPath = `${this.app.vault.configDir}/plugins/${this.manifest.id}/pdf.worker.mjs`;
 		pdfjsLib.GlobalWorkerOptions.workerSrc = this.app.vault.adapter.getResourcePath(workerPath);
-
-		this.registerView(
-			CHAT_VIEW_TYPE,
-			(leaf: WorkspaceLeaf) => new ChatView(leaf, this)
-		);
-
-		this.addRibbonIcon("messages-square", "Open PDF Chat", () => {
-			this.activateView();
-		});
-
-		this.app.workspace.onLayoutReady(() => {
-			this.processActiveLeaf(this.app.workspace.activeLeaf);
-		});
-		
-		this.registerEvent(
-			this.app.workspace.on('active-leaf-change', (leaf) => {
-				this.processActiveLeaf(leaf);
-			})
-		);
-
+		this.registerView(CHAT_VIEW_TYPE, (leaf: WorkspaceLeaf) => new ChatView(leaf, this));
+		this.addRibbonIcon("messages-square", "Open PDF Chat", () => { this.activateView(); });
+		this.app.workspace.onLayoutReady(() => { this.processActiveLeaf(this.app.workspace.activeLeaf); });
+		this.registerEvent(this.app.workspace.on('active-leaf-change', (leaf) => { this.processActiveLeaf(leaf); }));
 		this.addSettingTab(new SampleSettingTab(this.app, this));
 	}
 
@@ -65,24 +47,17 @@ export default class MyPlugin extends Plugin {
 	
 	async processActiveLeaf(leaf: WorkspaceLeaf | null) {
 		if (!leaf) return;
-
 		const viewType = leaf.view.getViewType();
-
 		if (viewType === 'pdf') {
 			const file = leaf.view.file;
 			if (file instanceof TFile) {
-				if (this.settings.lastProcessedFile === file.path && this.currentPdfText) {
-					return;
+				if (this.settings.lastProcessedFile !== file.path || !this.currentPdfText) {
+					await this.preparePdf(file);
 				}
-				await this.preparePdf(file);
 			}
 			return;
 		}
-
-		if (viewType === CHAT_VIEW_TYPE) {
-			return;
-		}
-
+		if (viewType === CHAT_VIEW_TYPE) { return; }
 		if (this.currentPdfText !== "") {
 			this.currentPdfText = "";
 			this.currentPdfChunks = [];
@@ -116,14 +91,12 @@ export default class MyPlugin extends Plugin {
 	splitIntoChunks(fullText: string): { text: string; page: number }[] {
         const chunks: { text: string; page: number }[] = [];
         const pageContents = fullText.split(/(\[Page \d+\]\n)/).slice(1);
-
         for (let i = 0; i < pageContents.length; i += 2) {
             const pageHeader = pageContents[i];
             const pageText = pageContents[i + 1];
             const pageMatch = pageHeader.match(/\[Page (\d+)\]/);
             const pageNum = pageMatch ? parseInt(pageMatch[1], 10) : 0;
             const paragraphs = pageText.split(/\n\s*\n/).filter(p => p.trim().length > 100);
-
             for (const para of paragraphs) {
                 chunks.push({ text: para.trim(), page: pageNum });
             }
@@ -132,45 +105,30 @@ export default class MyPlugin extends Plugin {
     }
 	
 	async preparePdf(file: TFile) {
-		if (!this.settings.apiKey) {
-			new Notice("API Key is not set.");
-			return;
-		}
-
+		if (!this.settings.apiKey) { new Notice("API Key is not set."); return; }
         this.isEmbeddingInProgress = true;
         this.embeddingProgress = 0;
 		this.settings.lastProcessedFile = file.path;
 		await this.saveSettings();
         this.onEmbeddingStateChange?.();
-
 		try {
-			new Notice(`Reading content from ${file.basename}...`);
 			this.currentPdfText = await this.parsePdf(await this.app.vault.readBinary(file));
 			this.currentPdfChunks = [];
 			const chunksToEmbed = this.splitIntoChunks(this.currentPdfText);
-
 			if (chunksToEmbed.length === 0) {
 				new Notice("No text content found in the PDF to analyze.");
 				return;
 			}
             new Notice(`Generating embeddings for ${chunksToEmbed.length} text chunks...`);
-
-			let processedCount = 0;
 			for (const chunk of chunksToEmbed) {
 				const embedding = await this.getEmbedding(chunk.text);
 				if (embedding) { this.currentPdfChunks.push({ ...chunk, embedding }); }
-				processedCount++;
-				this.embeddingProgress = Math.round((processedCount / chunksToEmbed.length) * 100);
+                this.embeddingProgress = Math.round((this.currentPdfChunks.length / chunksToEmbed.length) * 100);
                 this.onEmbeddingStateChange?.();
 			}
-			
-			if (this.currentPdfChunks.length > 0) {
-				new Notice(`Ready to chat about ${file.basename}.`);
-			}
-
+			if (this.currentPdfChunks.length > 0) { new Notice(`Ready to chat about ${file.basename}.`); }
 		} catch (error) {
-			console.error("Embedding API call failed during chunk processing:", error);
-			new Notice("Failed to generate text embeddings. Check API key or developer console.", 7000);
+			new Notice("Failed to prepare PDF. Check API key or developer console.", 7000);
 		} finally {
             this.isEmbeddingInProgress = false;
             this.onEmbeddingStateChange?.();
@@ -178,17 +136,14 @@ export default class MyPlugin extends Plugin {
 	}
 
 	async getEmbedding(text: string): Promise<number[] | null> {
-		const apiKey = this.settings.apiKey;
 		const model = this.settings.selectedEmbeddingModel;
         if (!model) { throw new Error("Embedding model not selected."); }
 		const url = `https://generativelanguage.googleapis.com/v1beta/${model}:embedContent`;
-
 		const response = await requestUrl({
 			url: url, method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+			headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.settings.apiKey },
 			body: JSON.stringify({ content: { parts: [{ text: text }] } })
 		});
-		
 		return response.json?.embedding?.values || null;
 	}
 
@@ -214,21 +169,104 @@ export default class MyPlugin extends Plugin {
 		} catch (error) { new Notice("Failed to fetch embedding models."); return []; }
 	}
 
+	// ★★★ activateViewメソッドを修正 ★★★
+	//async activateView() {
+	//	// 既存のチャットビューがあれば、一旦閉じる
+	//	this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
+	//
+	//	// 右サイドバーにリーフ（パネル）を確保する。存在しない場合は作成する(true)
+	//	const rightLeaf = this.app.workspace.getRightLeaf(true);
+	//	if (!rightLeaf) {
+	//		new Notice("Failed to create a panel for the chat view.");
+	//		return;
+	//	}
+	//
+	//	// 新しいチャットビューをセットしてアクティブにする
+	//	await rightLeaf.setViewState({
+	//		type: CHAT_VIEW_TYPE,
+	//		active: true,
+	//	});
+	//
+	//	// 確実にビューが表示されるようにする
+	//	this.app.workspace.revealLeaf(rightLeaf);
+	//}
+
+	// ★★★ activateViewメソッドを、より競合の少ないシンプルな方式に戻しました ★★★
 	async activateView() {
 		this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
-		const rightLeaf = this.app.workspace.getRightLeaf(false);
+		const rightLeaf = this.app.workspace.getRightLeaf(true);
 		if (rightLeaf) {
-			await rightLeaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
+			await rightLeaf.setViewState({
+				type: CHAT_VIEW_TYPE,
+				active: true,
+			});
 			this.app.workspace.revealLeaf(rightLeaf);
 		}
 	}
 
-	async loadSettings() { 
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); 
-	}
+	async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
 	async saveSettings() { await this.saveData(this.settings); }
 }
 
 class SampleSettingTab extends PluginSettingTab {
-	// (このクラスの内容は変更ありません)
+	plugin: MyPlugin;
+	constructor(app: App, plugin: MyPlugin) { super(app, plugin); this.plugin = plugin; }
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
+		containerEl.createEl('h2', { text: 'PDF Chat Plugin Settings' });
+
+		new Setting(containerEl)
+			.setName('Google Gemini API Key')
+			.addText(text => text.setPlaceholder('Enter your API key...').setValue(this.plugin.settings.apiKey).onChange(async (value) => {
+				this.plugin.settings.apiKey = value;
+				await this.plugin.saveSettings();
+			}));
+
+		containerEl.createEl('h3', { text: 'Chat Model' });
+
+		new Setting(containerEl)
+			.setName("Model")
+			.addDropdown(dropdown => {
+				if (this.plugin.settings.selectedModel) { dropdown.addOption(this.plugin.settings.selectedModel, this.plugin.settings.selectedModel.replace("models/", "")); }
+				dropdown.setValue(this.plugin.settings.selectedModel).onChange(async (value) => {
+					this.plugin.settings.selectedModel = value;
+					await this.plugin.saveSettings();
+				});
+			})
+			.addButton(button => button.setButtonText("Refresh").onClick(async () => {
+				const models = await this.plugin.fetchAvailableModels(this.plugin.settings.apiKey);
+				const dropdownEl = button.buttonEl.previousElementSibling as HTMLSelectElement;
+				if (models.length > 0 && dropdownEl) {
+					new Notice("Chat models loaded!");
+					dropdownEl.empty();
+					models.forEach(m => dropdownEl.add(new Option(m.replace("models/", ""), m)));
+					this.plugin.settings.selectedModel = dropdownEl.value;
+					await this.plugin.saveSettings();
+				}
+			}));
+
+		containerEl.createEl('h3', { text: 'Embedding Model' });
+		
+		new Setting(containerEl)
+			.setName("Model")
+			.addDropdown(dropdown => {
+				if (this.plugin.settings.selectedEmbeddingModel) { dropdown.addOption(this.plugin.settings.selectedEmbeddingModel, this.plugin.settings.selectedEmbeddingModel.replace("models/", "")); }
+				dropdown.setValue(this.plugin.settings.selectedEmbeddingModel).onChange(async (value) => {
+					this.plugin.settings.selectedEmbeddingModel = value;
+					await this.plugin.saveSettings();
+				});
+			})
+			.addButton(button => button.setButtonText("Refresh").onClick(async () => {
+				const models = await this.plugin.fetchAvailableEmbeddingModels(this.plugin.settings.apiKey);
+				const dropdownEl = button.buttonEl.previousElementSibling as HTMLSelectElement;
+				if (models.length > 0 && dropdownEl) {
+					new Notice("Embedding models loaded!");
+					dropdownEl.empty();
+					models.forEach(m => dropdownEl.add(new Option(m.replace("models/", ""), m)));
+					this.plugin.settings.selectedEmbeddingModel = dropdownEl.value;
+					await this.plugin.saveSettings();
+				}
+			}));
+	}
 }

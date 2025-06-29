@@ -1,9 +1,43 @@
+/* --- 通常（コンテンツが収まっている）のレイアウト --- */
+/* is-stickyクラスがない場合、特別なレイアウト指定は不要。自然なブロック要素として振る舞う */
+.chat-view-container {
+	/* 意図的に空にする */
+}
+
+
+/* ★★★ is-sticky クラスが付与された時（コンテンツが溢れた）のレイアウト ★★★ */
+.chat-view-container.is-sticky {
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* 親要素の高さいっぱいに広がる */
+}
+.chat-view-container.is-sticky .chat-messages {
+  flex-grow: 1; /* 残りの空間をすべて使う */
+  overflow-y: auto; /* スクロール可能に */
+}
+.chat-view-container.is-sticky .chat-header,
+.chat-view-container.is-sticky .chat-input-container {
+  flex-shrink: 0; /* サイズを固定 */
+}
+
+
+/* --- 以下、各パーツのスタイル --- */
+.chat-header {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.chat-header h4 { margin: 10px 0; flex-grow: 1; }
+.clear-chat-button { font-size: var(--font-ui-small); margin-left: 10px; }
+
 .chat-messages {
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 10px;
 }
+
 .user-message, .ai-message {
   padding: 10px 15px;
   border-radius: 18px;
@@ -25,36 +59,20 @@
   color: var(--text-on-accent);
   border-bottom-right-radius: 4px;
 }
+
 .chat-input-container {
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--background-modifier-border);
 }
 .chat-input-container input {
-    flex-grow: 1;
-}
-.chat-header {
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-.chat-header h4 {
-  margin: 10px 0;
   flex-grow: 1;
 }
-.clear-chat-button {
-  font-size: var(--font-ui-small);
-  margin-left: 10px;
-}
-
-/* ★ 以下のスタイルを追加 */
 .chat-input-container input.is-processing {
   font-style: italic;
 }
-
 .chat-input-container input.is-processing::placeholder {
   color: var(--text-muted);
-  opacity: 1; /*
-ブラウザのデフォルトスタイルを上書き */
+  opacity: 1;
 }
