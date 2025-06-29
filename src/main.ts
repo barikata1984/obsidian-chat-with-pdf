@@ -1,12 +1,13 @@
-import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, requestUrl, Notice, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, FileView, requestUrl, Notice, TFile, normalizePath } from 'obsidian';
 import * as pdfjsLib from 'pdfjs-dist';
-import { ChatView, CHAT_VIEW_TYPE } from './chat-view';
+import { ChatView, CHAT_VIEW_TYPE, ProcessingState } from './chat-view';
 
 interface MyPluginSettings {
 	apiKey: string;
 	selectedModel: string;
 	selectedEmbeddingModel: string;
 	lastProcessedFile?: string | null;
+	concurrency: number;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
@@ -14,25 +15,36 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 	selectedModel: 'models/gemini-1.5-pro-latest',
 	selectedEmbeddingModel: 'models/text-embedding-004',
 	lastProcessedFile: null,
+	concurrency: 10,
 }
 
 export interface PdfChunk {
-  text: string;
-  page: number;
-  embedding: number[];
+	text: string;
+	page: number;
+	embedding: number[];
+}
+
+interface PdfCache {
+	chunks: PdfChunk[];
 }
 
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
 	currentPdfText: string = "";
 	currentPdfChunks: PdfChunk[] = [];
-    public isEmbeddingInProgress: boolean = false;
-    public embeddingProgress: number = 0;
-	public onEmbeddingStateChange: (() => void) | null = null;
+	public onStateChange: ((state: ProcessingState) => void) | null = null;
+	private cacheDir: string;
+	private isProcessing: boolean = false;
 
 	async onload() {
 		await this.loadSettings();
-		const workerPath = `${this.app.vault.configDir}/plugins/${this.manifest.id}/pdf.worker.mjs`;
+
+		this.cacheDir = normalizePath(`${this.manifest.dir}/cache`);
+		if (!await this.app.vault.adapter.exists(this.cacheDir)) {
+			await this.app.vault.adapter.mkdir(this.cacheDir);
+		}
+
+		const workerPath = `${this.manifest.dir}/pdf.worker.mjs`;
 		pdfjsLib.GlobalWorkerOptions.workerSrc = this.app.vault.adapter.getResourcePath(workerPath);
 		this.registerView(CHAT_VIEW_TYPE, (leaf: WorkspaceLeaf) => new ChatView(leaf, this));
 		this.addRibbonIcon("messages-square", "Open PDF Chat", () => { this.activateView(); });
@@ -49,8 +61,8 @@ export default class MyPlugin extends Plugin {
 		if (!leaf) return;
 		const viewType = leaf.view.getViewType();
 		if (viewType === 'pdf') {
-			const file = leaf.view.file;
-			if (file instanceof TFile) {
+			const file = (leaf.view as FileView).file;
+			if (file) {
 				if (this.settings.lastProcessedFile !== file.path || !this.currentPdfText) {
 					await this.preparePdf(file);
 				}
@@ -63,7 +75,7 @@ export default class MyPlugin extends Plugin {
 			this.currentPdfChunks = [];
 			this.settings.lastProcessedFile = null;
 			await this.saveSettings();
-			this.onEmbeddingStateChange?.();
+			this.onStateChange?.({ status: 'idle' });
 		}
 	}
 
@@ -73,12 +85,24 @@ export default class MyPlugin extends Plugin {
 			let fullText = "";
 			for (let i = 1; i <= pdf.numPages; i++) {
 				const page = await pdf.getPage(i);
-				const textContent = await page.getTextContent();
-				const pageText = textContent.items
-					.filter(item => 'str' in item)
-					.map(item => (item as { str: string }).str)
-					.join(' ');
-				fullText += `[Page ${i}]\n${pageText}\n\n`;
+				const textContent = await page.getTextContent({ disableCombineTextItems: true });
+				const items = textContent.items.filter(item => 'str' in item).slice();
+				let lastY: number | undefined;
+				let pageText = "";
+				for (const item of items) {
+					const anyItem = item as any;
+					const currentY = anyItem.transform[5];
+					if (lastY !== undefined && pageText.length > 0) {
+						if (Math.abs(currentY - lastY) > (anyItem.height * 1.2)) {
+							pageText += '\n\n';
+						} else if (anyItem.str.trim().length > 0) {
+							pageText += ' ';
+						}
+					}
+					pageText += anyItem.str;
+					lastY = currentY;
+				}
+				fullText += `[Page ${i}]\n${pageText.trim()}\n\n`;
 			}
 			return fullText;
 		} catch (error) {
@@ -105,33 +129,102 @@ export default class MyPlugin extends Plugin {
     }
 	
 	async preparePdf(file: TFile) {
-		if (!this.settings.apiKey) { new Notice("API Key is not set."); return; }
-        this.isEmbeddingInProgress = true;
-        this.embeddingProgress = 0;
+		if (this.isProcessing) {
+			new Notice("Already processing a PDF. Please wait.");
+			return;
+		}
+		this.isProcessing = true;
+		
+		if (!this.settings.apiKey) {
+			new Notice("API Key is not set.");
+			this.isProcessing = false;
+			return;
+		}
 		this.settings.lastProcessedFile = file.path;
 		await this.saveSettings();
-        this.onEmbeddingStateChange?.();
+        
+		this.onStateChange?.({ status: 'searching_cache' });
+		await new Promise(resolve => setTimeout(resolve, 1000));
+
+		const cacheFileName = `${file.path.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+		const cachePath = normalizePath(`${this.cacheDir}/${cacheFileName}`);
+
+		if(await this.app.vault.adapter.exists(cachePath)) {
+			this.onStateChange?.({ status: 'loading_cache' });
+			try {
+				const cacheData = await this.app.vault.adapter.read(cachePath);
+				const cache: PdfCache = JSON.parse(cacheData);
+				this.currentPdfChunks = cache.chunks;
+				this.currentPdfText = this.currentPdfChunks.map(chunk => `[Page ${chunk.page}]\n${chunk.text}`).join('\n\n');
+				new Notice(`Embeddings for ${file.basename} loaded from cache.`);
+				this.onStateChange?.({ status: 'complete' });
+				this.isProcessing = false;
+				return;
+			} catch (error) {
+				console.error("Failed to load cache, reprocessing PDF...", error);
+				new Notice("Cache is corrupted, reprocessing PDF...");
+			}
+		}
+
+		this.onStateChange?.({ status: 'reading' });
 		try {
 			this.currentPdfText = await this.parsePdf(await this.app.vault.readBinary(file));
 			this.currentPdfChunks = [];
+			
+			this.onStateChange?.({ status: 'chunking' });
 			const chunksToEmbed = this.splitIntoChunks(this.currentPdfText);
+
 			if (chunksToEmbed.length === 0) {
 				new Notice("No text content found in the PDF to analyze.");
+				this.onStateChange?.({ status: 'complete' });
+				this.isProcessing = false;
 				return;
 			}
             new Notice(`Generating embeddings for ${chunksToEmbed.length} text chunks...`);
-			for (const chunk of chunksToEmbed) {
-				const embedding = await this.getEmbedding(chunk.text);
-				if (embedding) { this.currentPdfChunks.push({ ...chunk, embedding }); }
-                this.embeddingProgress = Math.round((this.currentPdfChunks.length / chunksToEmbed.length) * 100);
-                this.onEmbeddingStateChange?.();
+
+			const batchSize = this.settings.concurrency;
+			let processedCount = 0;
+
+			for (let i = 0; i < chunksToEmbed.length; i += batchSize) {
+				const batch = chunksToEmbed.slice(i, i + batchSize);
+				
+				this.onStateChange?.({
+					status: 'embedding',
+					progress: processedCount,
+					total: chunksToEmbed.length
+				});
+				
+				const promises = batch.map(chunk => this.getEmbedding(chunk.text));
+				const embeddings = await Promise.all(promises);
+
+				batch.forEach((chunk, index) => {
+					const embedding = embeddings[index];
+					if (embedding) {
+						this.currentPdfChunks.push({ ...chunk, embedding });
+					}
+				});
+				processedCount += batch.length;
 			}
-			if (this.currentPdfChunks.length > 0) { new Notice(`Ready to chat about ${file.basename}.`); }
+			this.onStateChange?.({ status: 'embedding', progress: chunksToEmbed.length, total: chunksToEmbed.length });
+
+			if (this.currentPdfChunks.length > 0) { 
+				new Notice(`Ready to chat about ${file.basename}.`);
+				const chunksToCache = this.currentPdfChunks.map(chunk => ({
+					text: chunk.text,
+					page: chunk.page,
+					embedding: chunk.embedding.map(value => parseFloat(value.toFixed(4)))
+				}));
+				
+				const cacheToSave: PdfCache = { chunks: chunksToCache };
+				await this.app.vault.adapter.write(cachePath, JSON.stringify(cacheToSave, null, 2));
+				new Notice(`Embeddings for ${file.basename} saved to cache.`);
+			}
 		} catch (error) {
 			new Notice("Failed to prepare PDF. Check API key or developer console.", 7000);
+			this.onStateChange?.({ status: 'error' });
 		} finally {
-            this.isEmbeddingInProgress = false;
-            this.onEmbeddingStateChange?.();
+            this.onStateChange?.({ status: 'complete' });
+			this.isProcessing = false;
         }
 	}
 
@@ -139,12 +232,18 @@ export default class MyPlugin extends Plugin {
 		const model = this.settings.selectedEmbeddingModel;
         if (!model) { throw new Error("Embedding model not selected."); }
 		const url = `https://generativelanguage.googleapis.com/v1beta/${model}:embedContent`;
-		const response = await requestUrl({
-			url: url, method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.settings.apiKey },
-			body: JSON.stringify({ content: { parts: [{ text: text }] } })
-		});
-		return response.json?.embedding?.values || null;
+		try {
+			const response = await requestUrl({
+				url: url, method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.settings.apiKey },
+				body: JSON.stringify({ content: { parts: [{ text: text }] } })
+			});
+			return response.json?.embedding?.values || null;
+		} catch (error) {
+			console.error("Embedding API call failed:", error);
+			new Notice("An embedding request failed. See console for details.");
+			return null;
+		}
 	}
 
 	async fetchAvailableModels(key: string): Promise<string[]> {
@@ -169,37 +268,11 @@ export default class MyPlugin extends Plugin {
 		} catch (error) { new Notice("Failed to fetch embedding models."); return []; }
 	}
 
-	// ★★★ activateViewメソッドを修正 ★★★
-	//async activateView() {
-	//	// 既存のチャットビューがあれば、一旦閉じる
-	//	this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
-	//
-	//	// 右サイドバーにリーフ（パネル）を確保する。存在しない場合は作成する(true)
-	//	const rightLeaf = this.app.workspace.getRightLeaf(true);
-	//	if (!rightLeaf) {
-	//		new Notice("Failed to create a panel for the chat view.");
-	//		return;
-	//	}
-	//
-	//	// 新しいチャットビューをセットしてアクティブにする
-	//	await rightLeaf.setViewState({
-	//		type: CHAT_VIEW_TYPE,
-	//		active: true,
-	//	});
-	//
-	//	// 確実にビューが表示されるようにする
-	//	this.app.workspace.revealLeaf(rightLeaf);
-	//}
-
-	// ★★★ activateViewメソッドを、より競合の少ないシンプルな方式に戻しました ★★★
 	async activateView() {
 		this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
 		const rightLeaf = this.app.workspace.getRightLeaf(true);
 		if (rightLeaf) {
-			await rightLeaf.setViewState({
-				type: CHAT_VIEW_TYPE,
-				active: true,
-			});
+			await rightLeaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
 			this.app.workspace.revealLeaf(rightLeaf);
 		}
 	}
@@ -268,5 +341,19 @@ class SampleSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}
 			}));
+
+		containerEl.createEl('h3', { text: 'Advanced Settings' });
+		new Setting(containerEl)
+			.setName('Parallel Embedding Requests')
+			.setDesc('Number of embedding requests to send at once. Higher values may be faster but can hit API rate limits.')
+			.addText(text => text
+				.setValue(String(this.plugin.settings.concurrency))
+				.onChange(async (value) => {
+					const num = parseInt(value, 10);
+					if (!isNaN(num) && num > 0 && num <= 50) { // レート制限を考慮し上限を設定
+						this.plugin.settings.concurrency = num;
+						await this.plugin.saveSettings();
+					}
+				}));
 	}
 }

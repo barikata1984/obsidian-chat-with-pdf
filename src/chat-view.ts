@@ -1,6 +1,12 @@
 import { ItemView, WorkspaceLeaf, requestUrl, MarkdownRenderer, Notice } from "obsidian";
 import MyPlugin from "./main";
 
+export type ProcessingState = {
+	status: 'idle' | 'searching_cache' | 'loading_cache' | 'reading' | 'chunking' | 'embedding' | 'complete' | 'error';
+	progress?: number;
+	total?: number;
+}
+
 interface GeminiContent {
 	role: 'user' | 'model';
 	parts: { text: string; }[];
@@ -15,11 +21,10 @@ export class ChatView extends ItemView {
     private sendButton: HTMLButtonElement;
 	private viewContainer: HTMLDivElement;
 	private resizeObserver: ResizeObserver;
+	private statusEl: HTMLDivElement | null = null;
+	private hasChatStarted: boolean = false;
 
-	constructor(leaf: WorkspaceLeaf, private plugin: MyPlugin) {
-		super(leaf);
-	}
-
+	constructor(leaf: WorkspaceLeaf, private plugin: MyPlugin) { super(leaf); }
 	getViewType() { return "pdf-chat-view"; }
 	getDisplayText() { return "PDF Chat"; }
 
@@ -33,13 +38,13 @@ export class ChatView extends ItemView {
 		headerEl.createEl("h4", { text: "PDF Chat (Gemini)" });
 		const clearButton = headerEl.createEl('button', { text: 'Clear Chat', cls: 'clear-chat-button' });
 
-		// ★ Clearボタンクリック時にレイアウトもリセットする
 		this.registerDomEvent(clearButton, 'click', () => {
 			this.conversationHistory = [];
 			if (this.messagesEl) { this.messagesEl.empty(); }
+			this.hasChatStarted = false;
+			if(this.viewContainer) { this.viewContainer.classList.remove('is-sticky'); }
+			this.updateProcessingState({ status: this.plugin.currentPdfText ? 'complete' : 'idle' });
 			new Notice("Chat history has been cleared.");
-			this.viewContainer.classList.remove('is-sticky'); // 固定レイアウトを解除
-			this.checkLayout();
 		});
 		
 		this.messagesEl = this.viewContainer.createDiv({ cls: "chat-messages" });
@@ -48,6 +53,13 @@ export class ChatView extends ItemView {
 		this.sendButton = inputContainer.createEl("button", { text: "送信" });
 
 		this.registerDomEvent(this.sendButton, 'click', async () => {
+			if (!this.hasChatStarted) {
+				this.hasChatStarted = true;
+				if (this.statusEl) {
+					this.statusEl.remove();
+					this.statusEl = null;
+				}
+			}
 			const userInput = this.inputEl.value;
 			if (!userInput || !this.messagesEl.isConnected || this.inputEl.disabled) return;
 			
@@ -93,18 +105,18 @@ export class ChatView extends ItemView {
 			}
 		});
 
-        this.plugin.onEmbeddingStateChange = this.updateInputState;
+        this.plugin.onStateChange = this.updateProcessingState;
         
 		this.resizeObserver = new ResizeObserver(() => {
 			this.checkLayout();
 		});
 		this.resizeObserver.observe(this.contentEl);
 
-		this.updateInputState();
+		this.updateProcessingState({ status: this.plugin.currentPdfText ? 'complete' : 'idle' });
 	}
 
     async onClose() {
-        if (this.plugin) { this.plugin.onEmbeddingStateChange = null; }
+        if (this.plugin) { this.plugin.onStateChange = null; }
 		if (this.resizeObserver) { this.resizeObserver.disconnect(); }
         return super.onClose();
     }
@@ -117,42 +129,76 @@ export class ChatView extends ItemView {
 		});
 	}
 
-	// ★★★ レイアウト判定ロジックをより安定なものに修正 ★★★
 	private checkLayout = () => {
 		requestAnimationFrame(() => {
 			if (!this.viewContainer || !this.contentEl) return;
-
-			// 既に下部固定レイアウトになっている場合は、何もしない
 			if (this.viewContainer.classList.contains('is-sticky')) {
 				return;
 			}
-	
 			const availableHeight = this.contentEl.clientHeight;
 			const contentHeight = this.viewContainer.scrollHeight;
-	
 			if (contentHeight > availableHeight) {
 				this.viewContainer.classList.add('is-sticky');
 			}
 		});
 	}
 
-    private updateInputState = () => {
-        if (!this.inputEl || !this.sendButton) return;
-        if (this.plugin.isEmbeddingInProgress) {
-            this.inputEl.disabled = true;
-            this.sendButton.disabled = true;
-            this.inputEl.classList.add('is-processing');
-            this.inputEl.placeholder = `埋め込みベクトルを生成中... ${this.plugin.embeddingProgress}%`;
-        } else {
-            this.inputEl.disabled = false;
-            this.sendButton.disabled = false;
-            this.inputEl.classList.remove('is-processing');
-            if (this.plugin.currentPdfText) {
-                this.inputEl.placeholder = "PDFについて質問...";
-            } else {
-                this.inputEl.placeholder = "解析対象のPDFを開いてください";
-            }
-        }
-        this.checkLayout();
-    }
+    private updateProcessingState = (state: ProcessingState) => {
+		if (this.hasChatStarted) return;
+
+		const createOrGetStatusEl = () => {
+			if (!this.statusEl || !this.statusEl.isConnected) {
+				this.messagesEl.querySelector('.chat-status-message')?.remove();
+				this.statusEl = this.messagesEl.createDiv({ cls: 'chat-status-message' });
+			}
+			return this.statusEl;
+		};
+		
+		const setInputState = (disabled: boolean, placeholder: string) => {
+			if(!this.inputEl) return;
+			this.inputEl.disabled = disabled;
+			this.inputEl.placeholder = placeholder;
+		};
+
+		switch (state.status) {
+			case 'searching_cache':
+				createOrGetStatusEl().setText('エンべディングキャッシュの検索中...');
+				setInputState(true, 'PDFの前処理中のためお待ちください。');
+				break;
+			case 'loading_cache':
+				createOrGetStatusEl().setText('キャッシュからエンベディングを読み込んでいます...');
+				setInputState(true, 'PDFの前処理中のためお待ちください。');
+				break;
+			case 'reading':
+				createOrGetStatusEl().setText('PDFを読み込んでいます...');
+				setInputState(true, 'PDFの前処理中のためお待ちください。');
+				break;
+			case 'chunking':
+				createOrGetStatusEl().setText('テキストをチャンク化しています...');
+				setInputState(true, 'PDFの前処理中のためお待ちください。');
+				break;
+			case 'embedding':
+				createOrGetStatusEl().setText(`チャンクのエンベディングを計算中 - ${state.progress} / ${state.total} 完了`);
+				setInputState(true, 'PDFの前処理中のためお待ちください。');
+				break;
+			case 'complete':
+				if (this.plugin.currentPdfText) {
+					createOrGetStatusEl().setText('エンベディング取得完了');
+					setInputState(false, '入力を受け付けます。');
+				} else {
+					if (this.statusEl) { this.statusEl.remove(); this.statusEl = null; }
+					setInputState(true, '解析対象のPDFを開いてください');
+				}
+				break;
+			case 'idle':
+				if (this.statusEl) { this.statusEl.remove(); this.statusEl = null; }
+				setInputState(true, '解析対象のPDFを開いてください');
+				break;
+			case 'error':
+				createOrGetStatusEl().setText('エラーが発生しました。コンソールを確認してください。');
+				setInputState(true, '前処理に失敗しました。');
+				break;
+		}
+		this.checkLayout();
+	}
 }

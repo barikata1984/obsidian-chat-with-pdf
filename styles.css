@@ -1,27 +1,25 @@
 /* --- 通常（コンテンツが収まっている）のレイアウト --- */
-/* is-stickyクラスがない場合、特別なレイアウト指定は不要。自然なブロック要素として振る舞う */
 .chat-view-container {
-	/* 意図的に空にする */
+	display: block;
 }
 
-
-/* ★★★ is-sticky クラスが付与された時（コンテンツが溢れた）のレイアウト ★★★ */
+/* is-sticky クラスが付与された時（コンテンツが溢れた）のレイアウト */
 .chat-view-container.is-sticky {
   display: flex;
   flex-direction: column;
-  height: 100%; /* 親要素の高さいっぱいに広がる */
+  height: 100%;
 }
 .chat-view-container.is-sticky .chat-messages {
-  flex-grow: 1; /* 残りの空間をすべて使う */
-  overflow-y: auto; /* スクロール可能に */
+  flex-grow: 1;
+  overflow-y: auto;
 }
 .chat-view-container.is-sticky .chat-header,
 .chat-view-container.is-sticky .chat-input-container {
-  flex-shrink: 0; /* サイズを固定 */
+  flex-shrink: 0;
 }
 
 
-/* --- 以下、各パーツのスタイル --- */
+/* --- 各パーツのスタイル --- */
 .chat-header {
   display: flex;
   align-items: center;
@@ -75,4 +73,14 @@
 .chat-input-container input.is-processing::placeholder {
   color: var(--text-muted);
   opacity: 1;
+}
+
+/* ★★★ ステータスメッセージのスタイルを最終修正 ★★★ */
+.chat-status-message {
+  align-self: flex-start; /* 左寄せ */
+  padding: 10px 15px;     /* 上下の余白を少なく */
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  user-select: none;
+  /* 背景色は指定せず、text-alignもデフォルトの左揃えに任せる */
 }
