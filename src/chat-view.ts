@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, requestUrl, MarkdownRenderer, Notice } from "o
 import MyPlugin from "./main";
 
 export type ProcessingState = {
-	status: 'idle' | 'searching_cache' | 'loading_cache' | 'reading' | 'chunking' | 'embedding' | 'complete' | 'error';
+	status: 'idle' | 'reading' | 'complete' | 'error';
 	progress?: number;
 	total?: number;
 }
@@ -193,14 +193,10 @@ export class ChatView extends ItemView {
 		};
 
 		switch (state.status) {
-			case 'searching_cache': createOrGetStatusEl().setText('エンべディングキャッシュの検索中...'); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
-			case 'loading_cache': createOrGetStatusEl().setText('キャッシュからエンベディングを読み込んでいます...'); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
 			case 'reading': createOrGetStatusEl().setText('PDFを読み込んでいます...'); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
-			case 'chunking': createOrGetStatusEl().setText('テキストをチャンク化しています...'); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
-			case 'embedding': createOrGetStatusEl().setText(`チャンクのエンベディングを計算中 - ${state.progress} / ${state.total} 完了`); setInputState(true, 'PDFの前処理中のためお待ちください。'); break;
 			case 'complete':
 				if (this.plugin.currentPdfText) {
-					createOrGetStatusEl().setText('エンベディング取得完了');
+					createOrGetStatusEl().setText('PDFの読み込みが完了しました。');
 					setInputState(false, '入力を受け付けます。');
 				} else {
 					if (this.statusEl) { this.statusEl.remove(); this.statusEl = null; this.checkLayout(); }
