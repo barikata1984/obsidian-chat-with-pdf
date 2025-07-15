@@ -46,10 +46,13 @@
   user-select: text !important;
   -webkit-user-select: text !important;
 }
+
+/* ★★★ AIの回答は幅100%に ★★★ */
 .ai-message {
   align-self: flex-start;
   background-color: var(--background-secondary);
   border-bottom-left-radius: 4px;
+  max-width: 100%;
 }
 .user-message {
   align-self: flex-end;
@@ -63,34 +66,36 @@
   gap: 8px;
   padding: 10px;
   border-top: 1px solid var(--background-modifier-border);
+  align-items: flex-end;
 }
-.chat-input-container input {
-  flex-grow: 1;
+
+/* ★★★ textareaのスタイルを修正 ★★★ */
+.chat-input-container textarea {
+  flex-grow: 1; /* ★ この行を復活させ、幅いっぱいに広がるようにする */
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.5;
+  resize: none;
+  max-height: 200px;
+  overflow-y: auto;
 }
-.chat-input-container input.is-processing {
-  font-style: italic;
-}
-.chat-input-container input.is-processing::placeholder {
+
+.chat-input-container textarea.is-processing::placeholder {
   color: var(--text-muted);
   opacity: 1;
 }
 
+/* ★★★ ステータスメッセージのスタイルを最終修正 ★★★ */
 .chat-status-message {
-  align-self: center;
-  padding: 10px 15px;
+  align-self: flex-start; /* 左寄せ */
+  padding: 5px 15px;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
   user-select: none;
-  width: 100%;
-  text-align: center;
-}
-
-/* ★★★ 類似度スコアのスタイルを追加 ★★★ */
-.similarity-score {
-  text-align: right;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  opacity: 0.8;
-  margin-top: 10px;
-  padding-right: 5px;
+  background-color: transparent;
+  width: fit-content;
+  text-align: left;
 }

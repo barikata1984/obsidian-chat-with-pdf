@@ -17,7 +17,8 @@ export const CHAT_VIEW_TYPE = "pdf-chat-view";
 export class ChatView extends ItemView {
 	private conversationHistory: GeminiContent[] = [];
 	private messagesEl: HTMLDivElement;
-    private inputEl: HTMLInputElement;
+	// ★★★ 型をHTMLTextAreaElementに変更 ★★★
+    private inputEl: HTMLTextAreaElement;
     private sendButton: HTMLButtonElement;
 	private viewContainer: HTMLDivElement;
 	private resizeObserver: ResizeObserver;
@@ -25,28 +26,53 @@ export class ChatView extends ItemView {
 	private hasChatStarted: boolean = false;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: MyPlugin) { super(leaf); }
+
 	getViewType() { return "pdf-chat-view"; }
 	getDisplayText() { return "PDF Chat"; }
+	getIcon() { return "messages-square"; }
 
 	async onOpen() {
 		const container = this.contentEl;
+
+		if (this.viewContainer && this.viewContainer.isConnected) {
+			return;
+		}
 		container.empty();
+		
 		this.viewContainer = container.createDiv({ cls: 'chat-view-container' });
+		
 		const headerEl = this.viewContainer.createDiv({ cls: 'chat-header' });
 		headerEl.createEl("h4", { text: "PDF Chat (Gemini)" });
 		const clearButton = headerEl.createEl('button', { text: 'Clear Chat', cls: 'clear-chat-button' });
+
 		this.registerDomEvent(clearButton, 'click', () => {
 			this.conversationHistory = [];
 			if (this.messagesEl) { this.messagesEl.empty(); }
 			this.hasChatStarted = false;
 			if(this.viewContainer) { this.viewContainer.classList.remove('is-sticky'); }
 			this.updateProcessingState({ status: this.plugin.currentPdfText ? 'complete' : 'idle' });
+			this.checkLayout();
 			new Notice("Chat history has been cleared.");
 		});
+		
 		this.messagesEl = this.viewContainer.createDiv({ cls: "chat-messages" });
 		const inputContainer = this.viewContainer.createDiv({ cls: "chat-input-container" });
-		this.inputEl = inputContainer.createEl("input", { type: "text", placeholder: "..." });
+
+		// ★★★ inputをtextareaに変更し、イベントリスナーを追加 ★★★
+		this.inputEl = inputContainer.createEl("textarea", { placeholder: "..." });
+		this.inputEl.rows = 1; // 初期状態では1行の高さにする
+
 		this.sendButton = inputContainer.createEl("button", { text: "送信" });
+
+		// 入力に応じて高さを自動調整
+		this.registerDomEvent(this.inputEl, 'input', this.autoGrowTextarea);
+		// Enterで送信、Shift+Enterで改行
+		this.registerDomEvent(this.inputEl, 'keydown', (evt) => {
+			if (evt.key === 'Enter' && !evt.shiftKey) {
+				evt.preventDefault();
+				this.sendButton.click();
+			}
+		});
 
 		this.registerDomEvent(this.sendButton, 'click', async () => {
 			if (!this.hasChatStarted) {
@@ -55,11 +81,14 @@ export class ChatView extends ItemView {
 					this.statusEl.remove();
 					this.statusEl = null;
 				}
+				this.checkLayout();
 			}
 			const userInput = this.inputEl.value;
 			if (!userInput || !this.messagesEl.isConnected || this.inputEl.disabled) return;
+			
 			this.messagesEl.createEl("div", { text: userInput, cls: "user-message" });
 			this.inputEl.value = "";
+			this.autoGrowTextarea(); // ★ 送信後に高さをリセット
 			this.conversationHistory.push({ role: 'user', parts: [{ text: userInput }] });
 			this.checkLayout();
 			this.scrollToBottom(); 
@@ -86,20 +115,6 @@ export class ChatView extends ItemView {
 						answerBubbleEl.empty();
 						await MarkdownRenderer.render(this.app, answer, answerBubbleEl, this.plugin.app.vault.getRoot().path, this);
 						this.conversationHistory.push({ role: 'model', parts: [{ text: answer }] });
-
-						// ★★★ ここからが修正点：類似度を計算して表示 ★★★
-						const answerEmbedding = await this.plugin.getEmbedding(answer);
-						if (answerEmbedding) {
-							const maxSimilarity = this.plugin.findMaxSimilarity(answerEmbedding);
-							if (maxSimilarity > 0) {
-								answerBubbleEl.createDiv({
-									cls: 'similarity-score',
-									text: `(最大関連度: ${(maxSimilarity * 100).toFixed(1)}%)`
-								});
-							}
-						}
-						// ★★★ 修正点ここまで ★★★
-
 					} else {
 						this.conversationHistory.pop();
 						answerBubbleEl.setText(`AIからの応答がありませんでした。 (理由: ${response.json.promptFeedback?.blockReason || '不明'})`);
@@ -115,8 +130,12 @@ export class ChatView extends ItemView {
 		});
 
         this.plugin.onStateChange = this.updateProcessingState;
-		this.resizeObserver = new ResizeObserver(() => { this.checkLayout(); });
+        
+		this.resizeObserver = new ResizeObserver(() => {
+			this.checkLayout();
+		});
 		this.resizeObserver.observe(this.contentEl);
+
 		this.updateProcessingState({ status: this.plugin.currentPdfText ? 'complete' : 'idle' });
 	}
 
@@ -137,7 +156,9 @@ export class ChatView extends ItemView {
 	private checkLayout = () => {
 		requestAnimationFrame(() => {
 			if (!this.viewContainer || !this.contentEl) return;
-			if (this.viewContainer.classList.contains('is-sticky')) { return; }
+			if (this.viewContainer.classList.contains('is-sticky')) {
+				return;
+			}
 			const availableHeight = this.contentEl.clientHeight;
 			const contentHeight = this.viewContainer.scrollHeight;
 			if (contentHeight > availableHeight) {
@@ -146,12 +167,21 @@ export class ChatView extends ItemView {
 		});
 	}
 
+	// ★★★ テキストエリアの高さを自動調整するメソッドを追加 ★★★
+	private autoGrowTextarea = () => {
+		if (this.inputEl) {
+			this.inputEl.style.height = 'auto';
+			this.inputEl.style.height = `${this.inputEl.scrollHeight}px`;
+		}
+	}
+
     private updateProcessingState = (state: ProcessingState) => {
 		if (this.hasChatStarted) return;
 		const createOrGetStatusEl = () => {
 			if (!this.statusEl || !this.statusEl.isConnected) {
 				this.messagesEl.querySelector('.chat-status-message')?.remove();
 				this.statusEl = this.messagesEl.createDiv({ cls: 'chat-status-message' });
+				this.checkLayout();
 			}
 			return this.statusEl;
 		};
@@ -159,6 +189,7 @@ export class ChatView extends ItemView {
 			if(!this.inputEl) return;
 			this.inputEl.disabled = disabled;
 			this.inputEl.placeholder = placeholder;
+			this.autoGrowTextarea(); // プレースホルダー変更時も高さを調整
 		};
 
 		switch (state.status) {
@@ -172,12 +203,12 @@ export class ChatView extends ItemView {
 					createOrGetStatusEl().setText('エンベディング取得完了');
 					setInputState(false, '入力を受け付けます。');
 				} else {
-					if (this.statusEl) { this.statusEl.remove(); this.statusEl = null; }
+					if (this.statusEl) { this.statusEl.remove(); this.statusEl = null; this.checkLayout(); }
 					setInputState(true, '解析対象のPDFを開いてください');
 				}
 				break;
 			case 'idle':
-				if (this.statusEl) { this.statusEl.remove(); this.statusEl = null; }
+				if (this.statusEl) { this.statusEl.remove(); this.statusEl = null; this.checkLayout(); }
 				setInputState(true, '解析対象のPDFを開いてください');
 				break;
 			case 'error':
@@ -185,6 +216,5 @@ export class ChatView extends ItemView {
 				setInputState(true, '前処理に失敗しました。');
 				break;
 		}
-		this.checkLayout();
 	}
 }
