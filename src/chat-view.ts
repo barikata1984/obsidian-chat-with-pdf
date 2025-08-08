@@ -125,8 +125,10 @@ export class ChatView extends ItemView {
             this.isSelectingScreenshot = true;
             new Notice("Click and drag on the PDF to select an area. Press ESC to cancel.");
 
-            this.currentCanvas.addEventListener('mousedown', this.onMouseDown);
+            document.addEventListener('mousemove', this.onMouseMove);
+        document.addEventListener('mouseup', this.onMouseUp);
             document.addEventListener('keydown', this.onKeyDown);
+            console.log("Screenshot selection initiated. Listeners attached.");
         });
 
         this.registerDomEvent(this.sendButton, 'click', async () => {
@@ -317,9 +319,14 @@ export class ChatView extends ItemView {
     }
 
     private onMouseDown = (e: MouseEvent) => {
-        if (!this.isSelectingScreenshot || !this.currentCanvas || !this.currentPdfViewEl) return;
+        console.log("onMouseDown: Event triggered. isSelectingScreenshot set to true.");
+        if (!this.currentCanvas || !this.currentPdfViewEl) return;
         this.startX = e.offsetX;
         this.startY = e.offsetY;
+
+        document.addEventListener('mousemove', this.onMouseMove);
+        document.addEventListener('mouseup', this.onMouseUp);
+        console.log(`onMouseDown: startX=${this.startX}, startY=${this.startY}, isSelectingScreenshot=${this.isSelectingScreenshot}`);
 
         this.selectionRect = this.currentPdfViewEl.createDiv({ cls: 'screenshot-selection-rect' });
         Object.assign(this.selectionRect.style, {
@@ -333,13 +340,16 @@ export class ChatView extends ItemView {
             zIndex: '99999',
         });
 
-        this.currentCanvas.addEventListener('mousedown', this.onMouseDown);
         this.currentCanvas.addEventListener('mousemove', this.onMouseMove);
         this.currentCanvas.addEventListener('mouseup', this.onMouseUp);
     };
 
     private onMouseMove = (e: MouseEvent) => {
-        if (!this.isSelectingScreenshot || !this.selectionRect) return;
+        if (!this.isSelectingScreenshot || !this.selectionRect) {
+            console.log("onMouseMove: Not selecting screenshot or no selectionRect. Returning.");
+            return;
+        }
+        console.log("onMouseMove: Event triggered.");
         this.endX = e.offsetX;
         this.endY = e.offsetY;
 
@@ -357,11 +367,14 @@ export class ChatView extends ItemView {
     };
 
     private onMouseUp = () => {
+        console.log("onMouseUp: Event triggered.");
         if (!this.isSelectingScreenshot || !this.currentCanvas) return;
         this.isSelectingScreenshot = false;
 
-        this.currentCanvas.removeEventListener('mousemove', this.onMouseMove);
-        this.currentCanvas.removeEventListener('mouseup', this.onMouseUp);
+        document.removeEventListener('mousemove', this.onMouseMove);
+        document.removeEventListener('mouseup', this.onMouseUp);
+        this.currentCanvas.removeEventListener('mousedown', this.onMouseDown);
+        document.removeEventListener('keydown', this.onKeyDown);
 
         if (this.selectionRect) {
             this.selectionRect.remove();
@@ -391,14 +404,15 @@ export class ChatView extends ItemView {
     };
 
     private onKeyDown = (e: KeyboardEvent) => {
+        console.log(`onKeyDown: Key pressed: ${e.key}, isSelectingScreenshot=${this.isSelectingScreenshot}`);
         if (e.key === 'Escape' && this.isSelectingScreenshot) {
             console.log("Escape key pressed. Cancelling selection.");
             this.isSelectingScreenshot = false;
             if (this.currentCanvas) {
                 this.currentCanvas.removeEventListener('mousedown', this.onMouseDown);
-                this.currentCanvas.removeEventListener('mousemove', this.onMouseMove);
-                this.currentCanvas.removeEventListener('mouseup', this.onMouseUp);
             }
+            document.removeEventListener('mousemove', this.onMouseMove);
+            document.removeEventListener('mouseup', this.onMouseUp);
             document.removeEventListener('keydown', this.onKeyDown);
             if (this.selectionRect) {
                 this.selectionRect.remove();
