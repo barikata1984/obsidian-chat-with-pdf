@@ -174,7 +174,10 @@ export class ChatView extends ItemView {
             this.scrollToBottom();
 
             try {
-                const systemPrompt = `あなたは、以下のPDF全文を読んだ上で、ユーザーの質問に答えるアシスタントです。会話の文脈も考慮して、自然な対話を行ってください.\n\n--- PDF CONTENT ---\n${this.plugin.currentPdfText}\n--- END PDF CONTENT ---\n\n以上の内容を踏まえて、次のユーザーの質問に答えてください。回答は必ずMarkdown形式で、見出しやリスト、太字などを使って分かりやすく整形してください。`;
+                const basePrompt = await this.app.vault.adapter.read(`${this.plugin.manifest.dir}/system_prompt.md`);
+                const pdfContext = `\n## 議論の対象\n議論の対象となるのは以下の内容です： ${this.plugin.currentPdfText || ''}`;
+                const systemPrompt = basePrompt + pdfContext;
+
                 const url = `https://generativelanguage.googleapis.com/v1beta/${this.plugin.settings.selectedModel}:generateContent`;
                 const requestBody = { contents: [ ...this.conversationHistory.slice(0, -1), { role: 'user', parts: [{ text: systemPrompt }, ...userParts] }] };
 

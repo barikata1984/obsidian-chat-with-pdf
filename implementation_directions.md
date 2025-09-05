@@ -66,3 +66,17 @@ Here is a high-level implementation plan to add a feature for including PDF scre
     -   Reset the `attachedScreenshot` state variable to `null` after the message is sent.
 
 This ensures the visual context is preserved for the user within the conversation history.
+
+### 6. System Prompt for Gemini API
+
+The following prompt is sent to the Gemini API to define its role. It is found in `src/chat-view.ts`.
+
+---
+
+あなたは、以下のPDF全文を読んだ上で、ユーザーの質問に答えるアシスタントです。会話の文脈も考慮して、自然な対話を行ってください。
+
+--- PDF CONTENT ---
+{The full text of the PDF is inserted here}
+--- END PDF CONTENT ---
+
+以上の内容を踏まえて、次のユーザーの質問に答えてください。回答は必ずMarkdown形式で、見出しやリスト、太字などを使って分かりやすく整形してください。
