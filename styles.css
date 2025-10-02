@@ -154,3 +154,38 @@
   width: fit-content;
   text-align: left;
 }
+
+/* --- AI Response Message Enhancements --- */
+.ai-response-wrapper {
+  align-self: flex-start;
+  width: 100%;
+}
+
+.ai-message {
+  position: relative;
+}
+
+.copy-code-button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease-in-out;
+  cursor: pointer;
+  background-color: var(--background-secondary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 2px;
+  line-height: 0; /* Align icon nicely */
+}
+
+.ai-message:hover .copy-code-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.copy-code-button:hover {
+  background-color: var(--background-modifier-hover);
+}

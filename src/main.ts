@@ -1,15 +1,19 @@
-import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, FileView, requestUrl, Notice, TFile, normalizePath } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, FileView, requestUrl, Notice, TFile } from 'obsidian';
 import * as pdfjsLib from 'pdfjs-dist';
 import { ChatView, CHAT_VIEW_TYPE, ProcessingState } from './chat-view';
 
 interface MyPluginSettings {
 	apiKey: string;
 	selectedModel: string;
+	pdfContextCharLimit: number;
+	maxRetryAttempts: number;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
 	apiKey: '',
 	selectedModel: 'models/gemini-1.5-pro-latest',
+	pdfContextCharLimit: 100000,
+	maxRetryAttempts: 3,
 }
 
 
@@ -176,5 +180,43 @@ class SampleSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}
 			}));
+        
+		containerEl.createEl('h3', { text: 'PDF Context' });
+        
+		new Setting(containerEl)
+			.setName('PDF context char limit')
+			.setDesc('Max characters from the PDF included per request. Increase if you need more context. Defaults to 100,000.')
+			.addText(text => {
+				text.inputEl.type = 'number';
+				text.inputEl.min = '1000';
+				text.inputEl.max = '1000000';
+				text.setValue(String(this.plugin.settings.pdfContextCharLimit || 100000));
+				text.onChange(async (value) => {
+					const n = parseInt(value, 10);
+					if (Number.isFinite(n)) {
+						this.plugin.settings.pdfContextCharLimit = Math.max(1000, Math.min(n, 1000000));
+						await this.plugin.saveSettings();
+					}
+				});
+			});
+
+		containerEl.createEl('h3', { text: 'Retry' });
+
+		new Setting(containerEl)
+			.setName('Max retry attempts')
+			.setDesc('Number of automatic retries for transient errors (429 / 5xx). Default is 3.')
+			.addText(text => {
+				text.inputEl.type = 'number';
+				text.inputEl.min = '1';
+				text.inputEl.max = '10';
+				text.setValue(String(this.plugin.settings.maxRetryAttempts || 3));
+				text.onChange(async (value) => {
+					const n = parseInt(value, 10);
+					if (Number.isFinite(n)) {
+						this.plugin.settings.maxRetryAttempts = Math.max(1, Math.min(n, 10));
+						await this.plugin.saveSettings();
+					}
+				});
+			});
 	}
 }
